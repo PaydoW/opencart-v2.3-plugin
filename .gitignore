@@ -3,3 +3,6 @@
 *.zip
 .idea/
 .vscode/
+*.sublime-workspace
+*.sublime-project
+.env

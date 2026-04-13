@@ -103,8 +103,20 @@ class ControllerExtensionPaymentPaydo extends Controller {
 				return;
 			}
 
+			$invoiceId = (string)$callback['invoice']['id'];
+			$txid      = (string)$callback['invoice']['txid'];
 			$state   = isset($callback['transaction']['state']) ? (int)$callback['transaction']['state'] : null;
 			$orderId = isset($callback['transaction']['order']['id']) ? (int)$callback['transaction']['order']['id'] : null;
+			$order_info = $orderId ? $this->model_checkout_order->getOrder($orderId) : array();
+
+			if (!$order_info || !$this->isPaydoOrder($order_info)) {
+				return;
+			}
+
+			$invoice = $this->getInvoice($invoiceId);
+			if (!$this->isValidInvoiceCallback($invoice, $invoiceId, $txid, $order_info, $state)) {
+				return;
+			}
 
 			if ($orderId && $state !== null) {
 				if ($state === 2) {
@@ -134,6 +146,18 @@ class ControllerExtensionPaymentPaydo extends Controller {
 
 			if (hash_equals((string)$callback['signature'], (string)$signature)) {
 				$order_id = (int)$callback['orderId'];
+				$order_info = $order_id ? $this->model_checkout_order->getOrder($order_id) : array();
+
+				if (!$order_info || !$this->isPaydoOrder($order_info)) {
+					return;
+				}
+
+				if (
+					!$this->isSameOrderAmount($callback['amount'], $order_info['total']) ||
+					strtoupper((string)$callback['currency']) !== strtoupper((string)$order_info['currency_code'])
+				) {
+					return;
+				}
 
 				if ($callback['status'] === 'success') {
 					$success_status_id = (int)$this->config->get('paydo_order_status_success');
@@ -180,38 +204,76 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		return 'valid';
 	}
 
+	private function isPaydoOrder($order_info) {
+		$payment_code = isset($order_info['payment_code']) ? strtolower((string)$order_info['payment_code']) : '';
+		$payment_method = isset($order_info['payment_method']) ? strtolower((string)$order_info['payment_method']) : '';
+
+		if ($payment_code === 'paydo') {
+			return true;
+		}
+
+		return strpos($payment_method, 'paydo') !== false;
+	}
+
+	private function isValidInvoiceCallback($invoice, $invoiceId, $txid, $order_info, $state) {
+		if (!is_array($invoice)) {
+			return false;
+		}
+
+		$invoice_identifier = isset($invoice['identifier']) ? (string)$invoice['identifier'] : '';
+		$invoice_order_id = isset($invoice['orderIdentifier']) ? (string)$invoice['orderIdentifier'] : '';
+		$invoice_txid = isset($invoice['transactionIdentifier']) ? (string)$invoice['transactionIdentifier'] : '';
+		$invoice_currency = isset($invoice['currency']) ? strtoupper((string)$invoice['currency']) : '';
+		$invoice_status = isset($invoice['status']) ? (int)$invoice['status'] : null;
+
+		if ($invoice_identifier === '' || !hash_equals($invoice_identifier, (string)$invoiceId)) {
+			return false;
+		}
+
+		if ($invoice_order_id === '' || !hash_equals($invoice_order_id, (string)$order_info['order_id'])) {
+			return false;
+		}
+
+		if ($invoice_txid === '' || !hash_equals($invoice_txid, (string)$txid)) {
+			return false;
+		}
+
+		if ($invoice_currency !== strtoupper((string)$order_info['currency_code'])) {
+			return false;
+		}
+
+		if (!$this->isSameOrderAmount(isset($invoice['amount']) ? $invoice['amount'] : null, $order_info['total'])) {
+			return false;
+		}
+
+		if ((int)$state === 2 && $invoice_status !== 1) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private function isSameOrderAmount($left, $right) {
+		return number_format((float)$left, 2, '.', '') === number_format((float)$right, 2, '.', '');
+	}
+
+	private function getInvoice($invoiceId) {
+		$response = $this->sendApiRequest(
+			'https://api.paydo.com/v1/invoices/' . rawurlencode((string)$invoiceId),
+			'GET'
+		);
+
+		if (!is_array($response) || !isset($response['data']) || !is_array($response['data'])) {
+			return array();
+		}
+
+		return $response['data'];
+	}
+
 	private function makeRequest($request = array()) {
 		$payload = json_encode($request, JSON_UNESCAPED_UNICODE);
 
-		if (!$this->curl) {
-			$this->curl = curl_init();
-			curl_setopt($this->curl, CURLOPT_URL, 'https://api.paydo.com/v1/invoices/create');
-			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, false);
-			curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($this->curl, CURLOPT_HEADER, false);
-		}
-
-		curl_setopt($this->curl, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-		curl_setopt($this->curl, CURLOPT_CUSTOMREQUEST, 'POST');
-		curl_setopt($this->curl, CURLOPT_POSTFIELDS, $payload);
-
-		$response = curl_exec($this->curl);
-
-		if ($response === false) {
-			curl_close($this->curl);
-			$this->curl = null;
-			return '';
-		}
-
-		$code = curl_getinfo($this->curl, CURLINFO_HTTP_CODE);
-		curl_close($this->curl);
-		$this->curl = null;
-
-		if ($code < 200 || $code >= 300) {
-			return '';
-		}
-
-		$json = json_decode($response, true);
+		$json = $this->sendApiRequest('https://api.paydo.com/v1/invoices/create', 'POST', $payload);
 		if (!is_array($json)) {
 			return '';
 		}
@@ -225,6 +287,44 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			: (isset($json['identifier']) ? $json['identifier'] : ''));
 
 		return $id ? (string)$id : '';
+	}
+
+	private function sendApiRequest($url, $method, $payload = '') {
+		if (!$this->curl) {
+			$this->curl = curl_init();
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($this->curl, CURLOPT_HEADER, false);
+		}
+
+		curl_setopt($this->curl, CURLOPT_URL, $url);
+		curl_setopt($this->curl, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+		curl_setopt($this->curl, CURLOPT_CUSTOMREQUEST, $method);
+
+		if ($method === 'POST') {
+			curl_setopt($this->curl, CURLOPT_POSTFIELDS, $payload);
+		} else {
+			curl_setopt($this->curl, CURLOPT_POSTFIELDS, null);
+		}
+
+		$response = curl_exec($this->curl);
+
+		if ($response === false) {
+			curl_close($this->curl);
+			$this->curl = null;
+			return array();
+		}
+
+		$code = curl_getinfo($this->curl, CURLINFO_HTTP_CODE);
+		curl_close($this->curl);
+		$this->curl = null;
+
+		if ($code < 200 || $code >= 300) {
+			return array();
+		}
+
+		$json = json_decode($response, true);
+		return is_array($json) ? $json : array();
 	}
 
 	private function generate_order_signature($order) {
