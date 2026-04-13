@@ -3,6 +3,8 @@
 	<div class="page-header">
 		<div class="container-fluid">
 			<div class="pull-right">
+				<a href="<?php echo $invoices; ?>" data-toggle="tooltip" title="<?php echo $button_invoices; ?>"
+					class="btn btn-info"><i class="fa fa-list"></i></a>
 				<button type="submit" form="form-paydo" data-toggle="tooltip" title="<?php echo $button_save; ?>"
 						class="btn btn-primary"><i class="fa fa-save"></i></button>
 				<a href="<?php echo $cancel; ?>" data-toggle="tooltip" title="<?php echo $button_cancel; ?>"
