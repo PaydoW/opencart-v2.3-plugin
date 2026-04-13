@@ -82,7 +82,7 @@ class ControllerExtensionPaymentPaydo extends Controller {
 
 		$this->saveInvoiceRecord($order_info, $invoice_id);
 
-		$redirect_url = "https://checkout.paydo.com/{$paydo_lang}/payment/invoice-preprocessing/{$invoice_id}";
+		$redirect_url = "https://checkout.paydo.com/{$paydo_lang}/payment/invoice-preprocessing/" . rawurlencode($invoice_id);
 		$this->response->setOutput(json_encode(array('redirect' => $redirect_url)));
 	}
 
@@ -294,6 +294,10 @@ class ControllerExtensionPaymentPaydo extends Controller {
 	}
 
 	private function getInvoice($invoiceId) {
+		if (!$this->isValidInvoiceIdentifier($invoiceId)) {
+			return array();
+		}
+
 		$response = $this->sendApiRequest(
 			'https://api.paydo.com/v1/invoices/' . rawurlencode((string)$invoiceId),
 			'GET'
@@ -399,15 +403,20 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			: (isset($json['invoice']['identifier']) ? $json['invoice']['identifier']
 			: (isset($json['identifier']) ? $json['identifier'] : ''));
 
-		return $id ? (string)$id : '';
+		$id = $id ? (string)$id : '';
+
+		return $this->isValidInvoiceIdentifier($id) ? $id : '';
 	}
 
 	private function sendApiRequest($url, $method, $payload = '') {
 		if (!$this->curl) {
 			$this->curl = curl_init();
-			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, false);
 			curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($this->curl, CURLOPT_HEADER, false);
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYHOST, 2);
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, true);
+			curl_setopt($this->curl, CURLOPT_CONNECTTIMEOUT, 10);
+			curl_setopt($this->curl, CURLOPT_TIMEOUT, 30);
 		}
 
 		curl_setopt($this->curl, CURLOPT_URL, $url);
@@ -438,6 +447,13 @@ class ControllerExtensionPaymentPaydo extends Controller {
 
 		$json = json_decode($response, true);
 		return is_array($json) ? $json : array();
+	}
+
+	private function isValidInvoiceIdentifier($invoiceId) {
+		return (bool)preg_match(
+			'/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i',
+			(string)$invoiceId
+		);
 	}
 
 	private function generate_order_signature($order) {
