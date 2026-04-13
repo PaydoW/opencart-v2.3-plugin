@@ -44,8 +44,7 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		}
 
 		$amount = number_format((float)$order_info['total'], 2, '.', '');
-
-		$paydo_lang = $this->getPaydoLanguageCode(); // 'ru' | 'en'
+		$paydo_lang = $this->getPaydoLanguageCode();
 
 		$request = array(
 			'publicKey' => (string)$this->config->get('paydo_public_id'),
@@ -67,6 +66,7 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		);
 
 		$request['signature'] = $this->generate_order_signature($request['order']);
+		$this->ensureInvoiceTableExists();
 
 		$wait_status_id = (int)$this->config->get('paydo_order_status_wait');
 		if ($wait_status_id) {
@@ -80,11 +80,15 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			return;
 		}
 
+		$this->saveInvoiceRecord($order_info, $invoice_id);
+
 		$redirect_url = "https://checkout.paydo.com/{$paydo_lang}/payment/invoice-preprocessing/{$invoice_id}";
 		$this->response->setOutput(json_encode(array('redirect' => $redirect_url)));
 	}
 
 	public function callback() {
+		$this->ensureInvoiceTableExists();
+
 		if (!isset($this->request->server['REQUEST_METHOD']) || $this->request->server['REQUEST_METHOD'] !== 'POST') {
 			return;
 		}
@@ -104,19 +108,27 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			}
 
 			$invoiceId = (string)$callback['invoice']['id'];
-			$txid      = (string)$callback['invoice']['txid'];
-			$state   = isset($callback['transaction']['state']) ? (int)$callback['transaction']['state'] : null;
-			$orderId = isset($callback['transaction']['order']['id']) ? (int)$callback['transaction']['order']['id'] : null;
+			$txid = $this->extractCallbackTxid($callback);
+			$state = isset($callback['transaction']['state']) ? (int)$callback['transaction']['state'] : null;
+			$callbackOrderId = isset($callback['transaction']['order']['id']) ? (int)$callback['transaction']['order']['id'] : 0;
+			$stored_invoice = $this->getStoredInvoiceByInvoiceId($invoiceId);
+			$orderId = !empty($stored_invoice['order_id']) ? (int)$stored_invoice['order_id'] : $callbackOrderId;
 			$order_info = $orderId ? $this->model_checkout_order->getOrder($orderId) : array();
 
 			if (!$order_info || !$this->isPaydoOrder($order_info)) {
 				return;
 			}
 
-			$invoice = $this->getInvoice($invoiceId);
-			if (!$this->isValidInvoiceCallback($invoice, $invoiceId, $txid, $order_info, $state)) {
+			if (!$this->isStoredInvoiceMatch($stored_invoice, $orderId, $invoiceId)) {
 				return;
 			}
+
+			$invoice = $this->getInvoice($invoiceId);
+			if (!$this->isValidInvoiceCallback($invoice, $invoiceId, $order_info, $state)) {
+				return;
+			}
+
+			$this->updateInvoiceRecord($orderId, $invoiceId, $txid, $state, $invoice);
 
 			if ($orderId && $state !== null) {
 				if ($state === 2) {
@@ -147,8 +159,13 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			if (hash_equals((string)$callback['signature'], (string)$signature)) {
 				$order_id = (int)$callback['orderId'];
 				$order_info = $order_id ? $this->model_checkout_order->getOrder($order_id) : array();
+				$stored_invoice = $order_id ? $this->getStoredInvoiceByOrderId($order_id) : array();
 
 				if (!$order_info || !$this->isPaydoOrder($order_info)) {
+					return;
+				}
+
+				if (empty($stored_invoice)) {
 					return;
 				}
 
@@ -192,16 +209,28 @@ class ControllerExtensionPaymentPaydo extends Controller {
 
 	private function callback_check($callback) {
 		$invoiceId = isset($callback['invoice']['id']) ? $callback['invoice']['id'] : null;
-		$txid      = isset($callback['invoice']['txid']) ? $callback['invoice']['txid'] : null;
-		$orderId   = isset($callback['transaction']['order']['id']) ? $callback['transaction']['order']['id'] : null;
-		$state     = isset($callback['transaction']['state']) ? $callback['transaction']['state'] : null;
+		$state = isset($callback['transaction']['state']) ? $callback['transaction']['state'] : null;
 
 		if (!$invoiceId) return 'Empty invoice id';
-		if (!$txid)      return 'Empty transaction id';
-		if (!$orderId)   return 'Empty order id';
 		if (!is_numeric($state) || (int)$state < 1 || (int)$state > 5) return 'State is not valid';
 
 		return 'valid';
+	}
+
+	private function extractCallbackTxid($callback) {
+		if (isset($callback['invoice']['txid']) && $callback['invoice']['txid'] !== '') {
+			return (string)$callback['invoice']['txid'];
+		}
+
+		if (isset($callback['transaction']['txid']) && $callback['transaction']['txid'] !== '') {
+			return (string)$callback['transaction']['txid'];
+		}
+
+		if (isset($callback['transaction']['transactionIdentifier']) && $callback['transaction']['transactionIdentifier'] !== '') {
+			return (string)$callback['transaction']['transactionIdentifier'];
+		}
+
+		return '';
 	}
 
 	private function isPaydoOrder($order_info) {
@@ -215,14 +244,25 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		return strpos($payment_method, 'paydo') !== false;
 	}
 
-	private function isValidInvoiceCallback($invoice, $invoiceId, $txid, $order_info, $state) {
+	private function isStoredInvoiceMatch($stored_invoice, $orderId, $invoiceId) {
+		if (empty($stored_invoice)) {
+			return false;
+		}
+
+		return (
+			isset($stored_invoice['order_id'], $stored_invoice['invoice_id']) &&
+			(int)$stored_invoice['order_id'] === (int)$orderId &&
+			hash_equals((string)$stored_invoice['invoice_id'], (string)$invoiceId)
+		);
+	}
+
+	private function isValidInvoiceCallback($invoice, $invoiceId, $order_info, $state) {
 		if (!is_array($invoice)) {
 			return false;
 		}
 
 		$invoice_identifier = isset($invoice['identifier']) ? (string)$invoice['identifier'] : '';
 		$invoice_order_id = isset($invoice['orderIdentifier']) ? (string)$invoice['orderIdentifier'] : '';
-		$invoice_txid = isset($invoice['transactionIdentifier']) ? (string)$invoice['transactionIdentifier'] : '';
 		$invoice_currency = isset($invoice['currency']) ? strtoupper((string)$invoice['currency']) : '';
 		$invoice_status = isset($invoice['status']) ? (int)$invoice['status'] : null;
 
@@ -231,10 +271,6 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		}
 
 		if ($invoice_order_id === '' || !hash_equals($invoice_order_id, (string)$order_info['order_id'])) {
-			return false;
-		}
-
-		if ($invoice_txid === '' || !hash_equals($invoice_txid, (string)$txid)) {
 			return false;
 		}
 
@@ -268,6 +304,83 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		}
 
 		return $response['data'];
+	}
+
+	private function ensureInvoiceTableExists() {
+		$this->db->query(
+			"CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "paydo_invoice` (
+				`paydo_invoice_id` INT(11) NOT NULL AUTO_INCREMENT,
+				`order_id` INT(11) NOT NULL,
+				`invoice_id` VARCHAR(64) NOT NULL,
+				`txid` VARCHAR(64) NOT NULL DEFAULT '',
+				`amount` DECIMAL(15,4) NOT NULL DEFAULT '0.0000',
+				`currency` VARCHAR(8) NOT NULL DEFAULT '',
+				`invoice_status` INT(11) DEFAULT NULL,
+				`transaction_state` INT(11) DEFAULT NULL,
+				`date_created` DATETIME NOT NULL,
+				`date_modified` DATETIME NOT NULL,
+				PRIMARY KEY (`paydo_invoice_id`),
+				UNIQUE KEY `paydo_order_id` (`order_id`),
+				UNIQUE KEY `paydo_invoice_identifier` (`invoice_id`)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8"
+		);
+	}
+
+	private function getStoredInvoiceByOrderId($orderId) {
+		$query = $this->db->query(
+			"SELECT *
+			 FROM `" . DB_PREFIX . "paydo_invoice`
+			 WHERE order_id = " . (int)$orderId . "
+			 LIMIT 1"
+		);
+
+		return isset($query->row) && is_array($query->row) ? $query->row : array();
+	}
+
+	private function getStoredInvoiceByInvoiceId($invoiceId) {
+		$query = $this->db->query(
+			"SELECT *
+			 FROM `" . DB_PREFIX . "paydo_invoice`
+			 WHERE invoice_id = '" . $this->db->escape((string)$invoiceId) . "'
+			 LIMIT 1"
+		);
+
+		return isset($query->row) && is_array($query->row) ? $query->row : array();
+	}
+
+	private function saveInvoiceRecord($order_info, $invoiceId) {
+		$this->db->query(
+			"INSERT INTO `" . DB_PREFIX . "paydo_invoice`
+			 SET order_id = " . (int)$order_info['order_id'] . ",
+			     invoice_id = '" . $this->db->escape((string)$invoiceId) . "',
+			     amount = '" . $this->db->escape(number_format((float)$order_info['total'], 4, '.', '')) . "',
+			     currency = '" . $this->db->escape((string)$order_info['currency_code']) . "',
+			     date_created = NOW(),
+			     date_modified = NOW()
+			 ON DUPLICATE KEY UPDATE
+			     invoice_id = VALUES(invoice_id),
+			     amount = VALUES(amount),
+			     currency = VALUES(currency),
+			     date_modified = VALUES(date_modified)"
+		);
+	}
+
+	private function updateInvoiceRecord($orderId, $invoiceId, $txid, $state, $invoice) {
+		$invoice_status = isset($invoice['status']) ? (int)$invoice['status'] : 'NULL';
+		$amount = isset($invoice['amount']) ? number_format((float)$invoice['amount'], 4, '.', '') : '0.0000';
+		$currency = isset($invoice['currency']) ? (string)$invoice['currency'] : '';
+
+		$this->db->query(
+			"UPDATE `" . DB_PREFIX . "paydo_invoice`
+			 SET txid = '" . $this->db->escape((string)$txid) . "',
+			     amount = '" . $this->db->escape($amount) . "',
+			     currency = '" . $this->db->escape($currency) . "',
+			     invoice_status = " . ($invoice_status === 'NULL' ? 'NULL' : (int)$invoice_status) . ",
+			     transaction_state = " . (int)$state . ",
+			     date_modified = NOW()
+			 WHERE order_id = " . (int)$orderId . "
+			   AND invoice_id = '" . $this->db->escape((string)$invoiceId) . "'"
+		);
 	}
 
 	private function makeRequest($request = array()) {
