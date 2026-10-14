@@ -31,14 +31,33 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		$data['entry_failed_status']   = $this->language->get('entry_failed_status');
 		$data['entry_status']          = $this->language->get('entry_status');
 		$data['entry_sort_order']      = $this->language->get('entry_sort_order');
+		$data['entry_methods_mode']    = $this->language->get('entry_methods_mode');
+		$data['entry_hosted_page']     = $this->language->get('entry_hosted_page');
+		$data['entry_project_id']      = $this->language->get('entry_project_id');
+		$data['entry_jwt_token']       = $this->language->get('entry_jwt_token');
+		$data['entry_enabled_methods'] = $this->language->get('entry_enabled_methods');
+		$data['help_methods_mode']     = $this->language->get('help_methods_mode');
+		$data['help_hosted_page']      = $this->language->get('help_hosted_page');
+		$data['help_project_id']       = $this->language->get('help_project_id');
+		$data['help_jwt_token']        = $this->language->get('help_jwt_token');
+		$data['help_enabled_methods']  = $this->language->get('help_enabled_methods');
+		$data['text_no_methods']       = $this->language->get('text_no_methods');
+		$data['text_syncing']          = $this->language->get('text_syncing');
+		$data['text_sync_success']     = $this->language->get('text_sync_success');
+		$data['text_sync_error']       = $this->language->get('text_sync_error');
+		$data['text_search_method']    = $this->language->get('text_search_method');
 
 		$data['button_save']    = $this->language->get('button_save');
 		$data['button_cancel']  = $this->language->get('button_cancel');
 		$data['button_invoices'] = $this->language->get('button_invoices');
+		$data['button_sync_methods'] = $this->language->get('button_sync_methods');
 
 		$data['error_warning']    = isset($this->error['warning']) ? $this->error['warning'] : '';
 		$data['error_public_id']  = isset($this->error['public_id']) ? $this->error['public_id'] : '';
 		$data['error_secret_key'] = isset($this->error['secret_key']) ? $this->error['secret_key'] : '';
+		$data['error_project_id'] = isset($this->error['project_id']) ? $this->error['project_id'] : '';
+		$data['error_jwt_token'] = isset($this->error['jwt_token']) ? $this->error['jwt_token'] : '';
+		$data['error_enabled_methods'] = isset($this->error['enabled_methods']) ? $this->error['enabled_methods'] : '';
 
 		$data['breadcrumbs'] = array(
 			array(
@@ -58,6 +77,7 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		$data['action'] = $this->url->link('extension/payment/paydo', 'token=' . $this->session->data['token'], true);
 		$data['cancel'] = $this->url->link('extension/extension', 'token=' . $this->session->data['token'] . '&type=payment', true);
 		$data['invoices'] = $this->url->link('extension/payment/paydo/invoices', 'token=' . $this->session->data['token'], true);
+		$data['sync_methods_url'] = str_replace('&amp;', '&', $this->url->link('extension/payment/paydo/syncmethods', 'token=' . $this->session->data['token'], true));
 
 		$fields = array(
 			'paydo_public_id',
@@ -67,10 +87,28 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			'paydo_order_status_error',
 			'paydo_status',
 			'paydo_sort_order',
+			'paydo_methods_mode',
+			'paydo_hosted_page_enabled',
+			'paydo_project_id',
+			'paydo_jwt_token',
+			'paydo_enabled_methods',
 		);
 
 		foreach ($fields as $f) {
 			$data[$f] = isset($this->request->post[$f]) ? $this->request->post[$f] : $this->config->get($f);
+		}
+
+		if ($data['paydo_hosted_page_enabled'] === null) {
+			$data['paydo_hosted_page_enabled'] = 1;
+		}
+
+		if (!is_array($data['paydo_enabled_methods'])) {
+			$data['paydo_enabled_methods'] = array();
+		}
+
+		$data['paydo_available_methods'] = $this->config->get('paydo_available_methods');
+		if (!is_array($data['paydo_available_methods'])) {
+			$data['paydo_available_methods'] = array();
 		}
 
 		$catalog_url = $this->config->get('config_secure') ? HTTPS_CATALOG : HTTP_CATALOG;
@@ -84,6 +122,61 @@ class ControllerExtensionPaymentPaydo extends Controller {
 		$data['footer']      = $this->load->controller('common/footer');
 
 		$this->response->setOutput($this->load->view('extension/payment/paydo.tpl', $data));
+	}
+
+	public function syncmethods() {
+		$this->load->language('extension/payment/paydo');
+		$this->response->addHeader('Content-Type: application/json');
+		if (empty($this->session->data['token']) || !isset($this->request->get['token']) ||
+			!is_string($this->request->get['token']) ||
+			!hash_equals((string)$this->session->data['token'], $this->request->get['token'])) {
+			$this->response->setOutput(json_encode(array('success' => false, 'error' => $this->language->get('error_permission'))));
+			return;
+		}
+
+		if (!$this->user->hasPermission('modify', 'extension/payment/paydo')) {
+			$this->response->setOutput(json_encode(array(
+				'success' => false,
+				'error' => $this->language->get('error_permission'),
+			)));
+			return;
+		}
+
+		if (!isset($this->request->server['REQUEST_METHOD']) || $this->request->server['REQUEST_METHOD'] !== 'POST') {
+			$this->response->setOutput(json_encode(array(
+				'success' => false,
+				'error' => $this->language->get('error_sync_request'),
+			)));
+			return;
+		}
+
+		$project_id = isset($this->request->post['project_id']) ? trim((string)$this->request->post['project_id']) : '';
+		$jwt_token = isset($this->request->post['jwt_token']) ? trim((string)$this->request->post['jwt_token']) : '';
+
+		if ($project_id === '' || $jwt_token === '') {
+			$this->response->setOutput(json_encode(array(
+				'success' => false,
+				'error' => $this->language->get('error_sync_credentials'),
+			)));
+			return;
+		}
+
+		$result = $this->fetchAvailableMethods($project_id, $jwt_token);
+		if (!$result['success']) {
+			$this->response->setOutput(json_encode($result));
+			return;
+		}
+
+		$this->load->model('setting/setting');
+		$settings = $this->model_setting_setting->getSetting('paydo');
+		$settings['paydo_available_methods'] = $result['methods'];
+		$this->model_setting_setting->editSetting('paydo', $settings);
+
+		$this->response->setOutput(json_encode(array(
+			'success' => true,
+			'count' => count($result['methods']),
+			'methods' => array_values($result['methods']),
+		)));
 	}
 
 	public function invoices() {
@@ -146,7 +239,135 @@ class ControllerExtensionPaymentPaydo extends Controller {
 			$this->error['secret_key'] = $this->language->get('error_secret_key');
 		}
 
+		$this->request->post['paydo_methods_mode'] = !empty($this->request->post['paydo_methods_mode']) ? 1 : 0;
+		$this->request->post['paydo_hosted_page_enabled'] = !empty($this->request->post['paydo_hosted_page_enabled']) ? 1 : 0;
+		$this->request->post['paydo_project_id'] = isset($this->request->post['paydo_project_id'])
+			? trim((string)$this->request->post['paydo_project_id'])
+			: '';
+		$this->request->post['paydo_jwt_token'] = isset($this->request->post['paydo_jwt_token'])
+			? trim((string)$this->request->post['paydo_jwt_token'])
+			: '';
+
+		$available_methods = $this->config->get('paydo_available_methods');
+		if (!is_array($available_methods)) {
+			$available_methods = array();
+		}
+		$this->request->post['paydo_available_methods'] = $available_methods;
+
+		$enabled_methods = isset($this->request->post['paydo_enabled_methods']) && is_array($this->request->post['paydo_enabled_methods'])
+			? $this->request->post['paydo_enabled_methods']
+			: array();
+		$clean_enabled_methods = array();
+		foreach ($enabled_methods as $enabled_method) {
+			if (is_scalar($enabled_method)) {
+				$clean_enabled_methods[] = trim((string)$enabled_method);
+			}
+		}
+		$enabled_methods = array_values(array_unique($clean_enabled_methods));
+		$enabled_methods = array_values(array_intersect($enabled_methods, array_map('strval', array_keys($available_methods))));
+		$this->request->post['paydo_enabled_methods'] = $enabled_methods;
+
+		if ($this->request->post['paydo_methods_mode']) {
+			if (!$this->request->post['paydo_hosted_page_enabled'] && !$enabled_methods) {
+				$this->error['enabled_methods'] = $this->language->get('error_enabled_methods');
+			}
+		}
+
 		return !$this->error;
+	}
+
+	private function fetchAvailableMethods($project_id, $jwt_token) {
+		$url = 'https://api.paydo.com/v3/instrument-settings/payment-methods/available-for-application/' . rawurlencode($project_id);
+		$curl = curl_init();
+
+		curl_setopt($curl, CURLOPT_URL, $url);
+		curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($curl, CURLOPT_HEADER, false);
+		curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
+		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+		curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
+		curl_setopt($curl, CURLOPT_TIMEOUT, 30);
+		curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+			'Accept: application/json',
+			'Authorization: Bearer ' . $jwt_token,
+		));
+
+		$response = curl_exec($curl);
+		$http_code = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		$curl_error = curl_error($curl);
+		curl_close($curl);
+
+		if ($response === false) {
+			return array(
+				'success' => false,
+				'error' => $curl_error !== '' ? $curl_error : $this->language->get('error_sync_request'),
+			);
+		}
+
+		$json = json_decode($response, true);
+		if ($http_code !== 200 || !is_array($json)) {
+			return array(
+				'success' => false,
+				'error' => sprintf($this->language->get('error_sync_api'), $http_code),
+			);
+		}
+
+		if (!isset($json['data']) || !is_array($json['data'])) {
+			return array('success' => false, 'error' => sprintf($this->language->get('error_sync_api'), $http_code));
+		}
+		$rows = $json['data'];
+		$methods = array();
+
+		foreach ($rows as $row) {
+			if (!is_array($row)) {
+				continue;
+			}
+
+			$method = isset($row['paymentMethod']) && is_array($row['paymentMethod']) ? $row['paymentMethod'] : $row;
+			if (empty($method['isEnabled']) || !isset($method['identifier'], $method['title'])) {
+				continue;
+			}
+			if (!is_scalar($method['identifier']) || !is_string($method['title'])) continue;
+
+			$identifier = trim((string)$method['identifier']);
+			$title = trim((string)$method['title']);
+			if (!preg_match('/^[1-9][0-9]*$/', $identifier) || $title === '') {
+				continue;
+			}
+
+			$logo = isset($method['logo']) ? trim((string)$method['logo']) : '';
+			if ($logo !== '' && !$this->isSafeRemoteUrl($logo)) {
+				$logo = '';
+			}
+
+			$methods[$identifier] = array(
+				'identifier' => $identifier,
+				'title' => $title,
+				'logo' => $logo,
+			);
+		}
+
+		uasort($methods, array($this, 'compareMethodsByTitle'));
+
+		return array(
+			'success' => true,
+			'methods' => $methods,
+		);
+	}
+
+	private function isSafeRemoteUrl($url) {
+		if (!filter_var($url, FILTER_VALIDATE_URL)) {
+			return false;
+		}
+
+		$scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+		return in_array($scheme, array('http', 'https'), true);
+	}
+
+	private function compareMethodsByTitle($left, $right) {
+		$left_title = isset($left['title']) ? (string)$left['title'] : '';
+		$right_title = isset($right['title']) ? (string)$right['title'] : '';
+		return strnatcasecmp($left_title, $right_title);
 	}
 
 	private function ensureInvoiceTableExists() {
