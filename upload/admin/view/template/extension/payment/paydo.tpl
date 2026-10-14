@@ -72,6 +72,91 @@
 						</div>
 					</div>
 
+					<div class="form-group">
+						<label class="col-sm-2 control-label" for="input-methods-mode">
+							<span data-toggle="tooltip" title="<?php echo htmlspecialchars($help_methods_mode, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $entry_methods_mode; ?></span>
+						</label>
+						<div class="col-sm-10">
+							<input type="hidden" name="paydo_methods_mode" value="0"/>
+							<label class="checkbox-inline">
+								<input type="checkbox" name="paydo_methods_mode" value="1" id="input-methods-mode"<?php echo $paydo_methods_mode ? ' checked="checked"' : ''; ?>/>
+								<?php echo $help_methods_mode; ?>
+							</label>
+						</div>
+					</div>
+
+					<div id="paydo-method-settings">
+						<div class="form-group">
+							<label class="col-sm-2 control-label" for="input-hosted-page">
+								<span data-toggle="tooltip" title="<?php echo htmlspecialchars($help_hosted_page, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $entry_hosted_page; ?></span>
+							</label>
+							<div class="col-sm-10">
+								<input type="hidden" name="paydo_hosted_page_enabled" value="0"/>
+								<label class="checkbox-inline">
+									<input type="checkbox" name="paydo_hosted_page_enabled" value="1" id="input-hosted-page"<?php echo $paydo_hosted_page_enabled ? ' checked="checked"' : ''; ?>/>
+									<?php echo $help_hosted_page; ?>
+								</label>
+							</div>
+						</div>
+
+						<div class="form-group<?php echo $error_project_id ? ' has-error' : ''; ?>">
+							<label class="col-sm-2 control-label" for="input-project-id">
+								<span data-toggle="tooltip" title="<?php echo htmlspecialchars($help_project_id, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $entry_project_id; ?></span>
+							</label>
+							<div class="col-sm-10">
+								<input type="text" name="paydo_project_id" value="<?php echo htmlspecialchars((string)$paydo_project_id, ENT_QUOTES, 'UTF-8'); ?>" placeholder="<?php echo $entry_project_id; ?>" id="input-project-id" class="form-control" autocomplete="off"/>
+								<?php if ($error_project_id) { ?><div class="text-danger"><?php echo $error_project_id; ?></div><?php } ?>
+							</div>
+						</div>
+
+						<div class="form-group<?php echo $error_jwt_token ? ' has-error' : ''; ?>">
+							<label class="col-sm-2 control-label" for="input-jwt-token">
+								<span data-toggle="tooltip" title="<?php echo htmlspecialchars($help_jwt_token, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $entry_jwt_token; ?></span>
+							</label>
+							<div class="col-sm-10">
+								<textarea name="paydo_jwt_token" rows="3" placeholder="<?php echo $entry_jwt_token; ?>" id="input-jwt-token" class="form-control" autocomplete="off"><?php echo htmlspecialchars((string)$paydo_jwt_token, ENT_QUOTES, 'UTF-8'); ?></textarea>
+								<?php if ($error_jwt_token) { ?><div class="text-danger"><?php echo $error_jwt_token; ?></div><?php } ?>
+							</div>
+						</div>
+
+						<div class="form-group">
+							<label class="col-sm-2 control-label"><?php echo $button_sync_methods; ?></label>
+							<div class="col-sm-10">
+								<button type="button" id="button-sync-methods" class="btn btn-default"><i class="fa fa-refresh"></i> <?php echo $button_sync_methods; ?></button>
+								<span id="paydo-sync-status" class="help-block" style="display:inline-block;margin:0 0 0 10px;"></span>
+							</div>
+						</div>
+
+						<div class="form-group<?php echo $error_enabled_methods ? ' has-error' : ''; ?>">
+							<label class="col-sm-2 control-label" for="input-method-search">
+								<span data-toggle="tooltip" title="<?php echo htmlspecialchars($help_enabled_methods, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $entry_enabled_methods; ?></span>
+							</label>
+							<div class="col-sm-10">
+								<input type="text" id="input-method-search" class="form-control" placeholder="<?php echo htmlspecialchars($text_search_method, ENT_QUOTES, 'UTF-8'); ?>" style="max-width:520px;margin-bottom:10px;"/>
+								<div id="paydo-methods-list" class="well well-sm" style="max-width:520px;max-height:320px;overflow:auto;">
+									<?php if ($paydo_available_methods) { ?>
+										<?php foreach ($paydo_available_methods as $identifier => $method) { ?>
+											<?php
+											$method_identifier = isset($method['identifier']) ? (string)$method['identifier'] : (string)$identifier;
+											$method_title = isset($method['title']) ? (string)$method['title'] : ('#' . $method_identifier);
+											$method_logo = isset($method['logo']) ? (string)$method['logo'] : '';
+											?>
+											<label class="paydo-method-row" data-title="<?php echo htmlspecialchars(strtolower($method_title), ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;align-items:center;gap:10px;padding:7px;margin:0;">
+												<input type="checkbox" name="paydo_enabled_methods[]" value="<?php echo htmlspecialchars($method_identifier, ENT_QUOTES, 'UTF-8'); ?>"<?php echo in_array($method_identifier, array_map('strval', $paydo_enabled_methods), true) ? ' checked="checked"' : ''; ?>/>
+												<?php if ($method_logo) { ?><img src="<?php echo htmlspecialchars($method_logo, ENT_QUOTES, 'UTF-8'); ?>" alt="" style="width:auto;height:24px;object-fit:contain;"/><?php } ?>
+												<span><strong><?php echo htmlspecialchars($method_title, ENT_QUOTES, 'UTF-8'); ?></strong><br/><small>#<?php echo htmlspecialchars($method_identifier, ENT_QUOTES, 'UTF-8'); ?></small></span>
+											</label>
+										<?php } ?>
+									<?php } else { ?>
+										<div class="paydo-no-methods text-muted"><?php echo $text_no_methods; ?></div>
+									<?php } ?>
+								</div>
+								<?php if ($error_enabled_methods) { ?><div class="text-danger"><?php echo $error_enabled_methods; ?></div><?php } ?>
+								<p class="help-block"><?php echo $help_enabled_methods; ?></p>
+							</div>
+						</div>
+					</div>
+
 					<!-- Success -->
 					<div class="form-group">
 						<label class="col-sm-2 control-label" for="input-complete-status"><?php echo $entry_complete_status; ?></label>
@@ -151,4 +236,93 @@
 
 	</div>
 </div>
+<script type="text/javascript">
+(function ($) {
+	'use strict';
+
+	var strings = {
+		syncing: <?php echo json_encode($text_syncing); ?>,
+		success: <?php echo json_encode($text_sync_success); ?>,
+		error: <?php echo json_encode($text_sync_error); ?>,
+		empty: <?php echo json_encode($text_no_methods); ?>
+	};
+
+	function toggleMethodSettings() {
+		$('#paydo-method-settings').toggle($('#input-methods-mode').is(':checked'));
+	}
+
+	function filterMethods() {
+		var query = $.trim($('#input-method-search').val()).toLowerCase();
+		$('#paydo-methods-list .paydo-method-row').each(function () {
+			$(this).toggle(!query || $(this).text().toLowerCase().indexOf(query) !== -1);
+		});
+	}
+
+	function renderMethods(methods) {
+		var $list = $('#paydo-methods-list');
+		var checked = {};
+		$list.find('input[name="paydo_enabled_methods[]"]:checked').each(function () {
+			checked[String(this.value)] = true;
+		});
+		$list.empty();
+
+		if (!methods || !methods.length) {
+			$('<div class="paydo-no-methods text-muted"></div>').text(strings.empty).appendTo($list);
+			return;
+		}
+
+		$.each(methods, function (index, method) {
+			var identifier = String(method.identifier || '');
+			var title = String(method.title || ('#' + identifier));
+			var $row = $('<label class="paydo-method-row"></label>')
+				.attr('data-title', title.toLowerCase())
+				.css({display: 'flex', alignItems: 'center', gap: '10px', padding: '7px', margin: 0});
+			$('<input type="checkbox" name="paydo_enabled_methods[]"/>')
+				.val(identifier)
+				.prop('checked', !!checked[identifier])
+				.appendTo($row);
+			if (method.logo) {
+				$('<img alt=""/>').attr('src', String(method.logo)).css({width: 'auto', height: '24px', objectFit: 'contain'}).appendTo($row);
+			}
+			$('<span></span>').append($('<strong></strong>').text(title), $('<br/>'), $('<small></small>').text('#' + identifier)).appendTo($row);
+			$row.appendTo($list);
+		});
+
+		filterMethods();
+	}
+
+	$('#input-methods-mode').on('change', toggleMethodSettings);
+	$('#input-method-search').on('input', filterMethods);
+	$('#button-sync-methods').on('click', function () {
+		var $button = $(this);
+		var $status = $('#paydo-sync-status');
+		$button.prop('disabled', true);
+		$status.removeClass('text-danger text-success').text(strings.syncing);
+
+		$.ajax({
+			url: <?php echo json_encode($sync_methods_url); ?>,
+			type: 'post',
+			dataType: 'json',
+			data: {
+				project_id: $('#input-project-id').val(),
+				jwt_token: $('#input-jwt-token').val()
+			}
+		}).done(function (json) {
+			if (!json || !json.success) {
+				$status.addClass('text-danger').text(json && json.error ? json.error : strings.error);
+				return;
+			}
+
+			renderMethods(json.methods || []);
+			$status.addClass('text-success').text(strings.success.replace('%s', String(json.count || 0)));
+		}).fail(function () {
+			$status.addClass('text-danger').text(strings.error);
+		}).always(function () {
+			$button.prop('disabled', false);
+		});
+	});
+
+	toggleMethodSettings();
+})(jQuery);
+</script>
 <?php echo $footer; ?>

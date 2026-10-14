@@ -14,16 +14,35 @@ class ModelExtensionPaymentPaydo extends Model
     {
         $this->load->language('extension/payment/paydo');
 
-        $query = $this->db->query("SELECT * FROM " . DB_PREFIX . "zone_to_geo_zone WHERE geo_zone_id = '" . (int)$this->config->get('payment_paydo_geo_zone_id') . "' AND country_id = '" . (int)$address['country_id'] . "' AND (zone_id = '" . (int)$address['zone_id'] . "' OR zone_id = '0')");
+        $status = (bool)$this->config->get('paydo_status');
 
-        if ($this->config->get('payment_paydo_total') > 0 && $this->config->get('payment_paydo_total') > $total) {
-            $status = false;
-        } elseif (!$this->config->get('payment_paydo_geo_zone_id')) {
-            $status = true;
-        } elseif ($query->num_rows) {
-            $status = true;
-        } else {
-            $status = false;
+        if ($status && $this->config->get('paydo_methods_mode')) {
+            $available_methods = $this->config->get('paydo_available_methods');
+            $enabled_methods = $this->config->get('paydo_enabled_methods');
+            $hosted_page_enabled = $this->config->get('paydo_hosted_page_enabled');
+            $has_enabled_method = $hosted_page_enabled === null ? true : (bool)$hosted_page_enabled;
+
+            if (is_array($available_methods) && is_array($enabled_methods)) {
+                foreach ($enabled_methods as $identifier) {
+                    if (!is_scalar($identifier)) {
+                        continue;
+                    }
+                    $identifier = (string)$identifier;
+                    if (
+                        preg_match('/^[1-9][0-9]*$/', $identifier) &&
+                        isset($available_methods[$identifier]) &&
+                        is_array($available_methods[$identifier]) &&
+                        !empty($available_methods[$identifier]['title'])
+                    ) {
+                        $has_enabled_method = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!$has_enabled_method) {
+                $status = false;
+            }
         }
 
         $method_data = array();
@@ -32,7 +51,7 @@ class ModelExtensionPaymentPaydo extends Model
                 'code' => 'paydo',
                 'title' => $this->language->get('text_title'),
                 'terms' => '',
-                'sort_order' => $this->config->get('payment_paydo_sort_order')
+                'sort_order' => $this->config->get('paydo_sort_order')
             );
         }
         return $method_data;

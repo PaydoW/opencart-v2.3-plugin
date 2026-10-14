@@ -32,6 +32,19 @@ Adds the ability to accept payments in OpenCart via PayDo.
 6. In the module settings, the **IPN URL** field will automatically generate a link for processing payments. Copy this link.
 7. Go to **Paydo.com → IPN → Add new IPN**, paste the copied link, and save it.
 
+### Optional: let customers choose a PayDo payment method
+
+1. Enable **Payment method selection** in the PayDo extension settings.
+2. Keep **PayDo Hosted Page** enabled if customers should also be able to choose from all eligible methods on the PayDo-hosted page.
+3. To offer specific methods directly, enter the PayDo **Project ID** and **JWT token**.
+4. Click **Sync from PayDo** to load the enabled payment methods for the project.
+5. Select the specific methods that should be available to customers.
+6. Save the extension settings.
+
+For the Hosted Page option, the plugin omits `paymentMethod`, so PayDo displays every method eligible for the payer. For a specific option, the selected numeric identifier is validated against the saved list and sent to PayDo as `paymentMethod`.
+
+The plugin uses the current PayDo `/v3/invoices` and `/v3/instrument-settings/payment-methods` endpoints.
+
 ### 4. Refresh Modifications
 1. Navigate to **Extensions → Modifications**.
 2. Click the **Refresh** button at the top right to apply changes.
@@ -88,3 +101,14 @@ which means if you would like to use this project's code in your own project you
 ## License
 
 Please refer to the [LICENSE](https://github.com/PaydoW/opencart-v2.3-plugin/blob/master/LICENSE) file that came with this project.
+
+## Version 2.2.0
+
+- PayDo API v3 for invoices, payment methods and transaction verification.
+- Optional Hosted Page and individual methods, including project-specific card acquiring.
+- Both flat and nested payment-method API responses are supported.
+- Card notifications can omit `transaction.state`. A verified paid invoice confirms settlement even when the checkout transaction endpoint still reports pending. Invoice ID, order ID, amount, currency and transaction ID are checked before updating the order.
+- Repeated payment requests reuse the saved invoice. To change the method after invoice creation, place a new order.
+- The return from PayDo also checks the checkout session's saved invoice through the API, without trusting redirect parameters. Configure the IPN URL for updates when customers do not return to the store.
+- Duplicate notifications do not repeat order history; delayed failures cannot reverse a verified payment. Temporary API verification failures return HTTP 503 so PayDo can retry.
+- Order amounts are converted using the order's saved OpenCart currency rate before signing.
